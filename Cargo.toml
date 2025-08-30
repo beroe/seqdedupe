@@ -1,0 +1,19 @@
+[package]
+name = "seqdedupe"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "seqdedupe"
+path = "src/main.rs"
+
+[[bin]]
+name = "seqdedupe-opt"
+path = "src/optimized.rs"
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["std"] }
+rayon = "1.7"
+num_cpus = "1.16"
