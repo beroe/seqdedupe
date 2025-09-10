@@ -14,10 +14,10 @@ a separate file, then run the --substring flag on that file in parallel mode.
   ./target/release/seqdedupe-opt --dna large_file.fna -o deduped.fna
   
   For substring removal (multithreaded):
-  # Use all available cores
+  > Use all available cores
   release/seqdedupe-opt --dna --substring --cores 8 deduped.fna -o final.fna
 
-  # Or let it use half (default)
+  > Or let it use half (default)
   release/seqdedupe-opt --dna --substring deduped.fna -o final.fna
 
   Recommended Workflow:
