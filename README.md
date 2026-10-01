@@ -1,26 +1,29 @@
 # Sequence deduplication. 
 
-For DNA files, it will only remove identical sequences (not substrings). 
-It checks for identical forward and reverse-complement sequences in the file.
+By default it only removes identical sequences (not substrings), streaming
+the file with low memory use. With `--dna` it also checks for identical
+forward and reverse-complement sequences in the file.
 
-For Amino Acid files there is the option to remove identical substrings. 
-Suggested workflow is to first remove exact identicals and save that as a
-a separate file, then run the --substring flag on that file in parallel mode.
+Use `-s` / `--substring` to also remove sequences that are identical
+substrings of longer ones (exact duplicates are always removed first).
+Suggested workflow for large files is to first remove exact identicals and save
+that as a separate file, then run the --substring flag on that file in parallel mode.
 
   - It will detect available cores and use half of them. 
   - Can be overridden with --cores flag
+  - `seqdedupe --version` prints the version
 
   For exact duplicates only (streaming):
-   ```./target/release/seqdedupe-opt --dna large_file.fna -o deduped.fna```
+   ```./target/release/seqdedupe --dna large_file.fna -o deduped.fna```
   
   For substring removal (multithreaded):
-  > Use all available cores
+  > Use 8 cores
 
-  ```release/seqdedupe-opt --dna --substring --cores 8 deduped.fna -o final.fna``` 
+  ```./target/release/seqdedupe --dna --substring --cores 8 deduped.fna -o final.fna``` 
 
   > Or let it use half (default)
 
-  ```release/seqdedupe-opt --dna --substring deduped.fna -o final.fna```
+  ```./target/release/seqdedupe --dna --substring deduped.fna -o final.fna```
 
   Recommended Workflow:
 
