@@ -9,6 +9,18 @@ substrings of longer ones (exact duplicates are always removed first).
 Suggested workflow for large files is to first remove exact identicals and save
 that as a separate file, then run the --substring flag on that file in parallel mode.
 
+## Building
+
+Requires Rust (https://rustup.rs). Build once after cloning (and again after pulling changes):
+
+   ```cargo build --release```
+
+The binary is written to `./target/release/seqdedupe`. Alternatively, install it onto your PATH:
+
+   ```cargo install --git https://github.com/beroe/seqdedupe```
+
+## Usage
+
   - It will detect available cores and use half of them. 
   - Can be overridden with --cores flag
   - `seqdedupe --version` prints the version
