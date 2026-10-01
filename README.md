@@ -11,7 +11,12 @@ that as a separate file, then run the --substring flag on that file in parallel 
 
 ## Building
 
-Requires Rust (https://rustup.rs). Build once after cloning (and again after pulling changes):
+Precompiled binaries for Linux, macOS and Windows are available under
+**Releases** on the right side of the GitHub repository page
+(https://github.com/beroe/seqdedupe/releases). Download the archive for
+your platform, unpack it, and run `seqdedupe`. No Rust needed.
+
+To build from source instead, you need Rust (https://rustup.rs). Build once after cloning (and again after pulling changes):
 
    ```cargo build --release```
 
