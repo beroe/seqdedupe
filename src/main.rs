@@ -8,8 +8,9 @@ use chrono::Utc;
 use rayon::prelude::*;
 
 #[derive(Parser)]
-#[command(name = "seqdedupe", version)]
+#[command(name = "seqdedupe", version, disable_version_flag = true)]
 #[command(about = "Remove duplicate and substring sequences from FASTA files")]
+#[command(help_template = "{name} {version}\n{about-with-newline}\n{usage-heading} {usage}\n\n{all-args}{after-help}")]
 struct Args {
     #[arg(help = "Input FASTA file")]
     input: String,
@@ -28,6 +29,9 @@ struct Args {
     
     #[arg(long, help = "Number of CPU cores to use (default: half of available cores)")]
     cores: Option<usize>,
+    
+    #[arg(short = 'v', long, short_alias = 'V', action = clap::ArgAction::Help, help = "Print version and help")]
+    version: Option<bool>,
 }
 
 #[derive(Debug, Clone)]

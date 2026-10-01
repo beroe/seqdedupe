@@ -23,7 +23,7 @@ The binary is written to `./target/release/seqdedupe`. Alternatively, install it
 
   - It will detect available cores and use half of them. 
   - Can be overridden with --cores flag
-  - `seqdedupe --version` prints the version
+  - `seqdedupe -v` (or `--version`) prints the version and help
 
   For exact duplicates only (streaming):
    ```./target/release/seqdedupe --dna large_file.fna -o deduped.fna```
