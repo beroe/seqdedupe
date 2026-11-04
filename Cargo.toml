@@ -9,3 +9,4 @@ anyhow = "1.0"
 chrono = { version = "0.4", features = ["std"] }
 rayon = "1.7"
 num_cpus = "1.16"
+aho-corasick = "1"
