@@ -3,9 +3,10 @@ use anyhow::Result;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use chrono::Utc;
 use rayon::prelude::*;
+use aho_corasick::{AhoCorasick, AhoCorasickKind, MatchKind};
 
 #[derive(Parser)]
 #[command(name = "seqdedupe", version, disable_version_flag = true)]
@@ -264,34 +265,75 @@ fn remove_substrings_parallel(input_file: &str, output_file: Option<&str>, is_dn
     // Sort by length (longest first)
     records.sort_by(|a, b| b.sequence.len().cmp(&a.sequence.len()));
     
-    // Containment is transitive, so a sequence is redundant iff ANY strictly
-    // longer sequence contains it (kept or not). Each check is independent,
-    // so there is no shared state and no ordering race between threads.
+    // Substring detection with an Aho-Corasick automaton: every sequence is a
+    // pattern (for DNA, its reverse complement is added as a second pattern
+    // for the same sequence), then each sequence is scanned once as a text.
+    // After exact duplicates are removed, any OTHER sequence found inside a
+    // text is strictly shorter and fully contained, so it is redundant. This
+    // is the same test as before (seq or its revcomp contained in a longer
+    // sequence), but roughly linear in total sequence length instead of
+    // comparing every pair of sequences.
     let total = records.len();
+    
+    // Empty sequences can't be automaton patterns (they match everywhere);
+    // they are substrings of any non-empty sequence, as before.
+    let has_nonempty = records.iter().any(|r| !r.sequence.is_empty());
+    let mut patterns: Vec<String> = Vec::new();
+    let mut pattern_owner: Vec<usize> = Vec::new();
+    for (i, r) in records.iter().enumerate() {
+        if r.sequence.is_empty() {
+            continue;
+        }
+        patterns.push(r.sequence.clone());
+        pattern_owner.push(i);
+        if is_dna {
+            patterns.push(reverse_complement(&r.sequence));
+            pattern_owner.push(i);
+        }
+    }
+    
+    eprintln!("[{}] Building Aho-Corasick automaton from {} patterns", timestamp(), patterns.len());
+    let automaton = AhoCorasick::builder()
+        .match_kind(MatchKind::Standard)
+        .kind(Some(AhoCorasickKind::ContiguousNFA))
+        .build(&patterns)?;
+    drop(patterns);
+    eprintln!("[{}] Automaton built ({} bytes), {}", 
+             timestamp(), automaton.memory_usage(), get_memory_usage());
+    
+    let contained: Vec<AtomicBool> = (0..total).map(|_| AtomicBool::new(false)).collect();
     let progress = AtomicUsize::new(0);
     let report_every = (total / 20).max(1);
     
     eprintln!("[{}] Checking {} sequences for substrings", timestamp(), total);
     
-    let keep: Vec<bool> = records
-        .par_iter()
-        .map(|record| {
-            let current_seq = &record.sequence;
-            let rev_comp = if is_dna { Some(reverse_complement(current_seq)) } else { None };
-            let n_longer = records.partition_point(|r| r.sequence.len() > current_seq.len());
-            
-            let is_substring = records[..n_longer].iter().any(|longer| {
-                longer.sequence.contains(current_seq.as_str())
-                    || rev_comp.as_ref().map_or(false, |rc| longer.sequence.contains(rc.as_str()))
-            });
-            
-            let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
-            if done % report_every == 0 {
-                eprintln!("[{}] Checked {}/{} sequences, {}", 
-                         timestamp(), done, total, get_memory_usage());
+    (0..total).into_par_iter().for_each(|i| {
+        let text = records[i].sequence.as_bytes();
+        for m in automaton.find_overlapping_iter(text) {
+            let j = pattern_owner[m.pattern().as_usize()];
+            // j == i is the text matching itself (or, for DNA, a
+            // reverse-palindromic sequence matching its own revcomp)
+            if j != i {
+                contained[j].store(true, Ordering::Relaxed);
             }
-            
-            !is_substring
+        }
+        
+        let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
+        if done % report_every == 0 {
+            eprintln!("[{}] Checked {}/{} sequences, {}", 
+                     timestamp(), done, total, get_memory_usage());
+        }
+    });
+    
+    let keep: Vec<bool> = records
+        .iter()
+        .zip(&contained)
+        .map(|(r, c)| {
+            if r.sequence.is_empty() {
+                !has_nonempty
+            } else {
+                !c.load(Ordering::Relaxed)
+            }
         })
         .collect();
     
