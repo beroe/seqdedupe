@@ -292,39 +292,88 @@ fn remove_substrings_parallel(input_file: &str, output_file: Option<&str>, is_dn
         }
     }
     
-    eprintln!("[{}] Building Aho-Corasick automaton from {} patterns", timestamp(), patterns.len());
-    let automaton = AhoCorasick::builder()
-        .match_kind(MatchKind::Standard)
-        .kind(Some(AhoCorasickKind::ContiguousNFA))
-        .build(&patterns)?;
-    drop(patterns);
-    eprintln!("[{}] Automaton built ({} bytes), {}", 
-             timestamp(), automaton.memory_usage(), get_memory_usage());
-    
+    // Aho-Corasick state IDs are 32 bits, so one automaton cannot hold an
+    // unbounded amount of pattern text: large inputs failed to build with
+    // "state identifier overflow". Build over CHUNKS of the pattern list
+    // instead and scan every sequence against each chunk. A sequence is
+    // redundant if it is contained in some other sequence, so the union of
+    // the per-chunk hits is exactly the result a single automaton would give.
     let contained: Vec<AtomicBool> = (0..total).map(|_| AtomicBool::new(false)).collect();
-    let progress = AtomicUsize::new(0);
-    let report_every = (total / 20).max(1);
-    
-    eprintln!("[{}] Checking {} sequences for substrings", timestamp(), total);
-    
-    (0..total).into_par_iter().for_each(|i| {
-        let text = records[i].sequence.as_bytes();
-        for m in automaton.find_overlapping_iter(text) {
-            let j = pattern_owner[m.pattern().as_usize()];
-            // j == i is the text matching itself (or, for DNA, a
-            // reverse-palindromic sequence matching its own revcomp)
-            if j != i {
-                contained[j].store(true, Ordering::Relaxed);
+    let total_pattern_bytes: usize = patterns.iter().map(|p| p.len()).sum();
+
+    // A single ContiguousNFA was observed to top out near 900 MB of pattern
+    // text; stay well under that, and halve the budget if a build still
+    // overflows so the run adapts instead of dying.
+    let mut chunk_bytes: usize = 384 * 1024 * 1024;
+    let mut chunk_start = 0usize;
+    let mut chunk_no = 0usize;
+
+    eprintln!("[{}] Substring scan: {} patterns, {} MB of pattern text",
+             timestamp(), patterns.len(), total_pattern_bytes / (1024 * 1024));
+
+    while chunk_start < patterns.len() {
+        // Take patterns until the byte budget is reached (always at least one).
+        let mut chunk_end = chunk_start;
+        let mut bytes = 0usize;
+        while chunk_end < patterns.len()
+            && (chunk_end == chunk_start || bytes + patterns[chunk_end].len() <= chunk_bytes)
+        {
+            bytes += patterns[chunk_end].len();
+            chunk_end += 1;
+        }
+
+        chunk_no += 1;
+        eprintln!("[{}] Chunk {}: building automaton from {} patterns ({} MB)",
+                 timestamp(), chunk_no, chunk_end - chunk_start, bytes / (1024 * 1024));
+
+        let automaton = match AhoCorasick::builder()
+            .match_kind(MatchKind::Standard)
+            .kind(Some(AhoCorasickKind::ContiguousNFA))
+            .build(&patterns[chunk_start..chunk_end])
+        {
+            Ok(a) => a,
+            Err(e) => {
+                // Too much pattern text for 32-bit state IDs: retry smaller.
+                if chunk_end - chunk_start > 1 {
+                    chunk_bytes /= 2;
+                    chunk_no -= 1;
+                    eprintln!("[{}] Automaton build failed ({}); retrying with a {} MB budget",
+                             timestamp(), e, chunk_bytes / (1024 * 1024));
+                    continue;
+                }
+                return Err(e.into());
             }
-        }
-        
-        let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
-        if done % report_every == 0 {
-            eprintln!("[{}] Checked {}/{} sequences, {}", 
-                     timestamp(), done, total, get_memory_usage());
-        }
-    });
-    
+        };
+
+        eprintln!("[{}] Chunk {} automaton built ({} bytes), {}",
+                 timestamp(), chunk_no, automaton.memory_usage(), get_memory_usage());
+
+        let owners = &pattern_owner[chunk_start..chunk_end];
+        let progress = AtomicUsize::new(0);
+        let report_every = (total / 20).max(1);
+
+        (0..total).into_par_iter().for_each(|i| {
+            let text = records[i].sequence.as_bytes();
+            for m in automaton.find_overlapping_iter(text) {
+                let j = owners[m.pattern().as_usize()];
+                // j == i is the text matching itself (or, for DNA, a
+                // reverse-palindromic sequence matching its own revcomp)
+                if j != i {
+                    contained[j].store(true, Ordering::Relaxed);
+                }
+            }
+
+            let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
+            if done % report_every == 0 {
+                eprintln!("[{}] Chunk {}: checked {}/{} sequences, {}",
+                         timestamp(), chunk_no, done, total, get_memory_usage());
+            }
+        });
+
+        chunk_start = chunk_end;
+    }
+    drop(patterns);
+
     let keep: Vec<bool> = records
         .iter()
         .zip(&contained)
